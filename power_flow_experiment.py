@@ -614,7 +614,12 @@ if __name__ == "__main__":
     # Solve Network
     
     ldf_results = network.lin_dist_flow(per_unit=True)
-    private_ldf_results = network.lin_dist_flow(per_unit=True)
+    private_ldf_results = private_network.lin_dist_flow(per_unit=True)
+    
+    df_results = network.solve_dss(ieee_123bus_modified_network_filepath, per_unit=True)
+    private_df_results = private_network.solve_dss(ieee_123bus_private_network_filepath, per_unit=True)
+    
+    # Compute Errors
     
     print('')
     
