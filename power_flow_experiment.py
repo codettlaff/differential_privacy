@@ -609,7 +609,7 @@ if __name__ == "__main__":
     for i in network.nodes:
         P_private = make_private_load_profile(B, epsilon, private_network.P[i], num_houses[i])
         private_network.P[i] = P_private
-    network.export_to_dss(ieee_123bus_private_network_filepath, 'ieee123_bus_private')
+    private_network.export_to_dss(ieee_123bus_private_network_filepath, 'ieee123_bus_private')
     
     # Solve Network
     
@@ -620,6 +620,9 @@ if __name__ == "__main__":
     private_df_results = private_network.solve_dss(ieee_123bus_private_network_filepath, per_unit=True)
     
     # Compute Errors
+    
+    ldf_error = compute_error(ldf_results, private_ldf_results, normalize_error=True)
+    df_error = compute_error(df_results, private_df_results, normalize_error=True)
     
     print('')
     
