@@ -49,7 +49,7 @@ class RadialNetwork:
         self.parent = {} # Dictionary such that parent[node_dx] = node index of parent node
 
         # Per-Unit
-        self.S_base = 0.0 # System MVA Base
+        self.S_base = S_base # System MVA Base
         self.V_base = [] # Voltage Base for each voltage region (Node-Wise)
         self.I_base = {} # Current Base for each voltage region (Branch-Wise)
         self.Z_base = {} # Impedance Base for each impedance region (Branch-Wise)
@@ -153,7 +153,7 @@ class RadialNetwork:
             self.children[i].append(j)
             self.parent[j] = i
             
-    def calculate_bases(self, S_base=100e6, V_base_root=None):
+    def calculate_bases(self, S_base, V_base_root=None):
 
         self.S_base = S_base
 
@@ -417,8 +417,8 @@ class RadialNetwork:
             V = {node: values * self.V_base[node] for node, values in V.items()}
             v = {(i,j): values * self.V_base[i] for (i,j), values in v.items()}
             i_branch = {(i,j): values * self.I_base[(i,j)] for (i,j), values in i_branch.items()}
-            p = {(i,j): values * self.S_base[(i,j)] for (i,j), values in p.items()}
-            q = {(i,j): values * self.S_base[(i,j)] for (i,j), values in q.items()}
+            p = {(i,j): values * self.S_base for (i,j), values in p.items()}
+            q = {(i,j): values * self.S_base for (i,j), values in q.items()}
 
         return {
             "V": V,
@@ -558,7 +558,7 @@ if __name__ == "__main__":
     results_dir = os.path.join(base_dir, 'results')
     
     ieee_123_filepath = os.path.join(data_dir, 'ieee_123bus', 'Master.dss')
-    network = RadialNetwork(ieee_123_filepath, S_base=10e3)
+    network = RadialNetwork(ieee_123_filepath, S_base=100e3)
     
     processed_data_dir = os.path.join(data_dir, 'processed_data')
     os.makedirs(processed_data_dir, exist_ok=True)
@@ -566,9 +566,9 @@ if __name__ == "__main__":
     ieee_123bus_private_network_filepath = os.path.join(processed_data_dir, 'ieee_123bus_private.dss')
     
     B = 5e3
-    epsilon = 1
+    epsilon = 100
     
-    def get_num_houses(network, house_peak_kw=5.0):
+    def get_num_houses(network, house_peak_kw=10.0):
         num_houses = np.zeros(len(network.nodes), dtype=int)
         for node in network.nodes:
             peak_kw = np.max(network.P[node]) * network.S_base / 1e3
@@ -576,6 +576,7 @@ if __name__ == "__main__":
         return num_houses
     
     num_houses = get_num_houses(network)
+    num_houses = num_houses * 10 # Make network larger
     
     def generate_loadshape(num_houses, seed=42):
         rng = np.random.default_rng(seed)
@@ -604,25 +605,33 @@ if __name__ == "__main__":
         P_new = P_max * loadshape
         network.P[i] = P_new
     network.export_to_dss(ieee_123bus_modified_network_filepath, 'ieee123_bus_modified')
-    
     private_network = copy.deepcopy(network)
-    for i in network.nodes:
-        P_private = make_private_load_profile(B, epsilon, private_network.P[i], num_houses[i])
-        private_network.P[i] = P_private
-    private_network.export_to_dss(ieee_123bus_private_network_filepath, 'ieee123_bus_private')
     
-    # Solve Network
+    def epsilon_trial(network, private_network, num_houses, epsilon, B):
+        
+        # Apply differential privacy
+        for i in network.nodes:
+            P = network.P[i] * network.S_base
+            P_private = make_private_load_profile(B, epsilon, P, num_houses[i])
+            private_network.P[i] = P_private / private_network.S_base
+        private_network.export_to_dss(ieee_123bus_private_network_filepath, 'ieee123_bus_private')
     
-    ldf_results = network.lin_dist_flow(per_unit=True)
-    private_ldf_results = private_network.lin_dist_flow(per_unit=True)
+        P_diff = []
+        for i in network.nodes: P_diff.append(network.P[i] - private_network.P[i])
     
-    df_results = network.solve_dss(ieee_123bus_modified_network_filepath, per_unit=True)
-    private_df_results = private_network.solve_dss(ieee_123bus_private_network_filepath, per_unit=True)
-    
-    # Compute Errors
-    
-    ldf_error = compute_error(ldf_results, private_ldf_results, normalize_error=True)
-    df_error = compute_error(df_results, private_df_results, normalize_error=True)
+        # Solve Network
+        
+        ldf_results = network.lin_dist_flow(per_unit=False)
+        private_ldf_results = private_network.lin_dist_flow(per_unit=False)
+        
+        df_results = network.solve_dss(ieee_123bus_modified_network_filepath, per_unit=False)
+        private_df_results = private_network.solve_dss(ieee_123bus_private_network_filepath, per_unit=False)
+        
+        # Compute Errors
+        ldf_error = compute_error(ldf_results, private_ldf_results, normalize_error=True)
+        df_error = compute_error(df_results, private_df_results, normalize_error=True)
+        
+        return ldf_error, df_error
     
     print('')
     
