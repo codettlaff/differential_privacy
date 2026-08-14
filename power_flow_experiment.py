@@ -10,6 +10,7 @@ import copy
 import pickle
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 from collections import defaultdict
 import opendssdirect as dss
 
@@ -639,22 +640,63 @@ if __name__ == "__main__":
         return ldf_error, df_error
     
     # Run Experiment
-    ldf_errors = {}
-    df_errors = {}
-    for epsilon in epsilon_values:
+    run_experiment = False # Done
+    if run_experiment:
+        ldf_errors = {}
+        df_errors = {}
+        for epsilon in epsilon_values:
+            
+            ldf_errors[epsilon], df_errors[epsilon] = epsilon_trial(
+                network,
+                private_network,
+                num_houses,
+                epsilon,
+                B)
         
-        ldf_errors[epsilon], df_errors[epsilon] = epsilon_trial(
-            network,
-            private_network,
-            num_houses,
-            epsilon,
-            B)
+        results = {
+            'ldf_errors': ldf_errors,
+            'df_errors': df_errors}
+        
+        with open(results_filepath, 'wb') as f: pickle.dump(results, f)
+    else:
+        with open(results_filepath, 'rb') as f: results = pickle.load(f)
     
-    results = {
-        'ldf_errors': ldf_errors,
-        'df_errors': df_errors}
+    def plot_results(results):
+        epsilons = np.array(sorted(results['ldf_errors'].keys()))
+
+        V_ldf = [np.mean(list(results['ldf_errors'][e]['V'].values())) for e in epsilons]
+        V_df  = [np.mean(list(results['df_errors'][e]['V'].values())) for e in epsilons]
+        p_ldf = [np.mean(list(results['ldf_errors'][e]['p'].values())) for e in epsilons]
+        p_df  = [np.mean(list(results['df_errors'][e]['p'].values())) for e in epsilons]
     
-    with open(results_filepath, 'wb') as f: pickle.dump(results, f)
+        fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+    
+        # Voltage
+        axes[0].plot(epsilons, V_ldf, 'o-', label='V_ldf')
+        axes[0].plot(epsilons, V_df,  'o-', label='V_df')
+        if 'V_th' in results:
+            axes[0].plot(epsilons, results['V_th'], 'o-', label='V_th')
+        axes[0].set_title('Voltage Error vs. Epsilon')
+        axes[0].set_xlabel('Epsilon')
+        axes[0].set_yscale('log')
+        axes[0].grid(True)
+        axes[0].legend()
+    
+        # Power flow
+        axes[1].plot(epsilons, p_ldf, 'o-', label='p_ldf')
+        axes[1].plot(epsilons, p_df,  'o-', label='p_df')
+        if 'p_th' in results:
+            axes[1].plot(epsilons, results['p_th'], 'o-', label='p_th')
+        axes[1].set_title('Power Flow Error vs. Epsilon')
+        axes[1].set_xlabel('Epsilon')
+        axes[1].set_yscale('log')
+        axes[1].grid(True)
+        axes[1].legend()
+    
+        plt.tight_layout()
+        plt.show()
+        
+    plot_results(results)
     
     print('')
     
