@@ -7,6 +7,7 @@ Created on Fri Aug 14 09:47:15 2026
 
 import os
 import copy
+import pickle
 import numpy as np
 import pandas as pd
 from collections import defaultdict
@@ -557,6 +558,9 @@ if __name__ == "__main__":
     data_dir = os.path.join(base_dir, 'data')
     results_dir = os.path.join(base_dir, 'results')
     
+    os.makedirs(results_dir, exist_ok=True)
+    results_filepath = os.path.join(results_dir, 'results.pkl')
+    
     ieee_123_filepath = os.path.join(data_dir, 'ieee_123bus', 'Master.dss')
     network = RadialNetwork(ieee_123_filepath, S_base=100e3)
     
@@ -567,6 +571,7 @@ if __name__ == "__main__":
     
     B = 5e3
     epsilon = 100
+    epsilon_values = np.logspace(0, 3, 10)
     
     def get_num_houses(network, house_peak_kw=10.0):
         num_houses = np.zeros(len(network.nodes), dtype=int)
@@ -632,6 +637,24 @@ if __name__ == "__main__":
         df_error = compute_error(df_results, private_df_results, normalize_error=True)
         
         return ldf_error, df_error
+    
+    # Run Experiment
+    ldf_errors = {}
+    df_errors = {}
+    for epsilon in epsilon_values:
+        
+        ldf_errors[epsilon], df_errors[epsilon] = epsilon_trial(
+            network,
+            private_network,
+            num_houses,
+            epsilon,
+            B)
+    
+    results = {
+        'ldf_errors': ldf_errors,
+        'df_errors': df_errors}
+    
+    with open(results_filepath, 'wb') as f: pickle.dump(results, f)
     
     print('')
     
