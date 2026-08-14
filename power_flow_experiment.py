@@ -14,7 +14,7 @@ import opendssdirect as dss
 
 class RadialNetwork:
 
-    def __init__(self, source_dss_filepath):
+    def __init__(self, source_dss_filepath, S_base=100e3):
 
         # Node Attributes
         self.nodes = [] # List of node indices [0,1,2,...,n]
@@ -54,7 +54,7 @@ class RadialNetwork:
         self.I_base = {} # Current Base for each voltage region (Branch-Wise)
         self.Z_base = {} # Impedance Base for each impedance region (Branch-Wise)
 
-        self.load_from_dss(source_dss_filepath)
+        self.load_from_dss(source_dss_filepath, S_base)
         
     # Set containing all nodes along path from root to node
     def C(self, i):
@@ -259,7 +259,7 @@ class RadialNetwork:
             if not node in self.P: self.P[node] = np.zeros(self.T)
             if not node in self.Q: self.Q[node] = np.zeros(self.T)
             
-    def load_from_dss(self, dss_filepath):
+    def load_from_dss(self, dss_filepath, S_base=100e3):
 
         dss.Text.Command("Clear")
         dss.Text.Command(f"Compile [{dss_filepath}]")
@@ -276,7 +276,7 @@ class RadialNetwork:
         self.V = [0.0] * len(self.nodes) # Initialize node voltages.
         self.V0 = dss.Bus.VMagAngle()[0] # Source true voltage (not per-unit).
 
-        self.calculate_bases()
+        self.calculate_bases(S_base)
         self.load_branch_impedance_from_dss(dss_filepath)
         self.load_loads_from_dss(dss_filepath)
         
@@ -558,7 +558,7 @@ if __name__ == "__main__":
     results_dir = os.path.join(base_dir, 'results')
     
     ieee_123_filepath = os.path.join(data_dir, 'ieee_123bus', 'Master.dss')
-    network = RadialNetwork(ieee_123_filepath)
+    network = RadialNetwork(ieee_123_filepath, S_base=10e3)
     
     processed_data_dir = os.path.join(data_dir, 'processed_data')
     os.makedirs(processed_data_dir, exist_ok=True)
@@ -595,6 +595,8 @@ if __name__ == "__main__":
         profile = np.mean(profiles, axis=0)
         return profile / np.max(profile)
     
+    # Create Network
+    
     network.num_houses = num_houses
     for i in network.nodes:
         loadshape = generate_loadshape(num_houses[0])
@@ -608,6 +610,11 @@ if __name__ == "__main__":
         P_private = make_private_load_profile(B, epsilon, private_network.P[i], num_houses[i])
         private_network.P[i] = P_private
     network.export_to_dss(ieee_123bus_private_network_filepath, 'ieee123_bus_private')
+    
+    # Solve Network
+    
+    ldf_results = network.lin_dist_flow(per_unit=True)
+    private_ldf_results = network.lin_dist_flow(per_unit=True)
     
     print('')
     
