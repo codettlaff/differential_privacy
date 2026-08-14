@@ -6,6 +6,7 @@ Created on Fri Aug 14 09:47:15 2026
 """
 
 import os
+import copy
 import numpy as np
 import pandas as pd
 from collections import defaultdict
@@ -494,61 +495,61 @@ class RadialNetwork:
             'p': p,
             'q': q}
         
-    def theoretical_normalized_error(network, p_true, V_true, B, epsilon):
+def theoretical_normalized_error(network, p_true, V_true, B, epsilon):
 
-        # Power Flow Standard Deviation
-        sigma_p = {}
-        error_p_bound_norm = {}
-        for (i, j) in network.lines:
-            K = len(network.D(j))
-            sigma_p[(i, j)] = (2 * np.sqrt(2) * K * B) / epsilon
-            e_bound = np.sqrt(network.T) * sigma_p[(i, j)]
-            error_p_bound_norm[(i, j)] = e_bound / (e_bound + np.linalg.norm(p_true[(i,j)])) # Normalize
+    # Power Flow Standard Deviation
+    sigma_p = {}
+    error_p_bound_norm = {}
+    for (i, j) in network.lines:
+        K = len(network.D(j))
+        sigma_p[(i, j)] = (2 * np.sqrt(2) * K * B) / epsilon
+        e_bound = np.sqrt(network.T) * sigma_p[(i, j)]
+        error_p_bound_norm[(i, j)] = e_bound / (e_bound + np.linalg.norm(p_true[(i,j)])) # Normalize
 
-        # Node Voltage Standard Deviation
-        sigma_V = {}
-        error_V_bound_norm = {}
-        for n in network.nodes:
-            a_n = []
-            path1 = network.L(n)
-            for j in network.nodes:
-                path2 = network.L(j)
-                common_edges = set(path1) & set(path2)
-                val = 0.0
-                for (h,k) in common_edges:
-                    val += network.r1[(h,k)]
-                a_n.append(val)
-            sigma_V[n] = np.sqrt(np.sum(np.array(a_n) ** 2)) * 4 * np.sqrt(2) * B / epsilon
-            e_bound = np.sqrt(network.T) * sigma_V[n]
-            error_V_bound_norm[n] = e_bound / (e_bound + np.linalg.norm(V_true[n]))
+    # Node Voltage Standard Deviation
+    sigma_V = {}
+    error_V_bound_norm = {}
+    for n in network.nodes:
+        a_n = []
+        path1 = network.L(n)
+        for j in network.nodes:
+            path2 = network.L(j)
+            common_edges = set(path1) & set(path2)
+            val = 0.0
+            for (h,k) in common_edges:
+                val += network.r1[(h,k)]
+            a_n.append(val)
+        sigma_V[n] = np.sqrt(np.sum(np.array(a_n) ** 2)) * 4 * np.sqrt(2) * B / epsilon
+        e_bound = np.sqrt(network.T) * sigma_V[n]
+        error_V_bound_norm[n] = e_bound / (e_bound + np.linalg.norm(V_true[n]))
 
-        return error_p_bound_norm, error_V_bound_norm
-        
-    def compute_error(results1, results2, normalize_error=False):
-        def error_fn(a, b):
-            num = np.linalg.norm(a - b)
-            if not normalize_error:
-                return num  # absolute error
-            den = num + np.linalg.norm(b)
-            return 0.0 if np.isclose(den, 0.0) else num / den
+    return error_p_bound_norm, error_V_bound_norm
+    
+def compute_error(results1, results2, normalize_error=False):
+    def error_fn(a, b):
+        num = np.linalg.norm(a - b)
+        if not normalize_error:
+            return num  # absolute error
+        den = num + np.linalg.norm(b)
+        return 0.0 if np.isclose(den, 0.0) else num / den
 
-        errors = {}
-        for key in ['V', 'v', 'i', 'p', 'q']:
-            errors[key] = {}
-            keys1 = set(results1[key].keys())
-            keys2 = set(results2[key].keys())
-            common_keys = keys1 & keys2
-            for k in common_keys:
-                a = np.array(results1[key][k])
-                b = np.array(results2[key][k])
-                errors[key][k] = error_fn(a, b)
-        return errors
-        
-    def make_private_load_profile(B, epsilon, P_profile, num_houses=1):
-        b = 2 * B / epsilon
-        noise = np.random.laplace(0, b, size=(num_houses, len(P_profile)))
-        P_tilde = P_profile + np.sum(noise, axis=0)
-        return P_tilde
+    errors = {}
+    for key in ['V', 'v', 'i', 'p', 'q']:
+        errors[key] = {}
+        keys1 = set(results1[key].keys())
+        keys2 = set(results2[key].keys())
+        common_keys = keys1 & keys2
+        for k in common_keys:
+            a = np.array(results1[key][k])
+            b = np.array(results2[key][k])
+            errors[key][k] = error_fn(a, b)
+    return errors
+    
+def make_private_load_profile(B, epsilon, P_profile, num_houses=1):
+    b = 2 * B / epsilon
+    noise = np.random.laplace(0, b, size=(num_houses, len(P_profile)))
+    P_tilde = P_profile + np.sum(noise, axis=0)
+    return P_tilde
     
 if __name__ == "__main__":
     
@@ -559,5 +560,55 @@ if __name__ == "__main__":
     ieee_123_filepath = os.path.join(data_dir, 'ieee_123bus', 'Master.dss')
     network = RadialNetwork(ieee_123_filepath)
     
+    processed_data_dir = os.path.join(data_dir, 'processed_data')
+    os.makedirs(processed_data_dir, exist_ok=True)
+    ieee_123bus_modified_network_filepath = os.path.join(processed_data_dir, 'ieee_123bus_modified.dss')
+    ieee_123bus_private_network_filepath = os.path.join(processed_data_dir, 'ieee_123bus_private.dss')
+    
+    B = 5e3
+    epsilon = 1
+    
+    def get_num_houses(network, house_peak_kw=5.0):
+        num_houses = np.zeros(len(network.nodes), dtype=int)
+        for node in network.nodes:
+            peak_kw = np.max(network.P[node]) * network.S_base / 1e3
+            num_houses[node] = max(1, int(round(peak_kw / house_peak_kw)))
+        return num_houses
+    
+    num_houses = get_num_houses(network)
+    
+    def generate_loadshape(num_houses, seed=42):
+        rng = np.random.default_rng(seed)
+    
+        # Base daily residential profile
+        t = np.linspace(0, 24, 96, endpoint=False)
+        base = (
+        0.3
+        + 0.4 * np.exp(-((t - 7) / 2) ** 2)
+        + 0.8 * np.exp(-((t - 19) / 3) ** 2))
+        
+        # Aggregate independent houses, averaging makes profile smoother
+        profiles = [
+        np.clip(base * rng.normal(1.0, 0.15, len(t)), 0, None)
+        for _ in range(num_houses)]
+
+        profile = np.mean(profiles, axis=0)
+        return profile / np.max(profile)
+    
+    network.num_houses = num_houses
+    for i in network.nodes:
+        loadshape = generate_loadshape(num_houses[0])
+        P_max = np.max(network.P[i])
+        P_new = P_max * loadshape
+        network.P[i] = P_new
+    network.export_to_dss(ieee_123bus_modified_network_filepath, 'ieee123_bus_modified')
+    
+    private_network = copy.deepcopy(network)
+    for i in network.nodes:
+        P_private = make_private_load_profile(B, epsilon, private_network.P[i], num_houses[i])
+        private_network.P[i] = P_private
+    network.export_to_dss(ieee_123bus_private_network_filepath, 'ieee123_bus_private')
+    
+    print('')
     
     
